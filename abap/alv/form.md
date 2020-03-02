@@ -1,0 +1,455 @@
+# 标准ALV 
+
+## LAYOUT
+
+```ABAP
+ DATA:
+ 		LWA_LAYOUT TYPE LVC_S_LAYO,  "STRUCTURE:布局结构
+        LIT_SORT   TYPE LVC_T_SORT.  "TABLE TYPE:排序顺序
+
+  LC_REPID = SY-REPID.
+*创建布局
+  LWA_LAYOUT-ZEBRA = 'X'.
+  LWA_LAYOUT-CWIDTH_OPT = 'X'.
+  LWA_LAYOUT-NO_ROWMARK = 'X'.
+```
+
+
+
+## FIELDCAT
+
+```ABAP
+FORM FRM_CREATE_FIELDCAT  TABLES T_FCAT TYPE LVC_T_FCAT
+                          USING U_FIELDNAME TYPE LVC_FNAME
+                                U_SCRTEXT   TYPE ANY
+                                U_OUTPUTLEN TYPE ANY
+                                U_JUST      TYPE LVC_JUST
+                                U_EDIT      TYPE LVC_EDIT
+                                U_LZERO     TYPE LVC_LZERO
+                                U_DO_SUM    TYPE LVC_DOSUM
+                                U_CHECKBOX  TYPE LVC_CHECKB
+                                U_NO_ZERO   TYPE LVC_NOZERO
+                                U_DECIMALS  TYPE DECIMALS.
+
+  DATA: LWA_FCAT TYPE LVC_S_FCAT.
+  LWA_FCAT-FIELDNAME = U_FIELDNAME.
+  LWA_FCAT-SCRTEXT_L = U_SCRTEXT.
+  LWA_FCAT-OUTPUTLEN = U_OUTPUTLEN.
+  LWA_FCAT-JUST      = U_JUST.
+  LWA_FCAT-EDIT      = U_EDIT.
+  LWA_FCAT-LZERO     = U_LZERO.
+  LWA_FCAT-DO_SUM    = U_DO_SUM.
+  LWA_FCAT-CHECKBOX  = U_CHECKBOX.
+  LWA_FCAT-NO_ZERO   = U_NO_ZERO.
+  LWA_FCAT-DECIMALS  = U_DECIMALS.
+
+  IF U_FIELDNAME = 'SEL' OR U_FIELDNAME = 'XH'.
+    LWA_FCAT-FIX_COLUMN = 'X'.
+  ENDIF.
+
+  APPEND LWA_FCAT TO T_FCAT.
+  CLEAR LWA_FCAT.
+ENDFORM. 
+```
+
+
+
+## REUSE_ALV_GRID_DISPLAY_LVC
+
+```ABAP
+ CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY_LVC'
+    EXPORTING
+      I_CALLBACK_PROGRAM       = LC_REPID
+      I_CALLBACK_PF_STATUS_SET = 'FRM_SET_STATUS'
+      I_CALLBACK_USER_COMMAND  = 'FRM_ALV_USER_COMMAND'
+    " I_CALLBACK_HTML_TOP_OF_PAGE = 'FRM_TOP_OF_PAGE'
+      IS_LAYOUT_LVC            = LWA_LAYOUT
+      IT_FIELDCAT_LVC          = LIT_FCAT                                                                                                                                       " IT_SORT_LVC              = LIT_SORT
+      I_SAVE                   = 'A'
+    TABLES
+      T_OUTTAB                 = GIT_OUT
+    EXCEPTIONS
+      PROGRAM_ERROR            = 1
+      OTHERS                   = 2.
+```
+
+## SET_STATUS
+
+```
+FORM FRM_SET_STATUS USING RT_EXTAB TYPE SLIS_T_EXTAB.
+  SET PF-STATUS 'STATUS1'.
+ENDFORM.  
+```
+
+## USER_COMMAND
+
+```ABAP
+FORM FRM_ALV_USER_COMMAND USING U_UCOMM LIKE SY-UCOMM
+                            U_SELFIELD TYPE SLIS_SELFIELD.
+
+  "DATA: LC_VBELN  TYPE  LIKP-VBELN.
+  DATA: ALV_GRID TYPE REF TO CL_GUI_ALV_GRID.
+  DATA: LC_LINE TYPE P.
+  DATA : LV_INDEX TYPE I.
+
+  CALL FUNCTION 'GET_GLOBALS_FROM_SLVC_FULLSCR'
+    IMPORTING
+      E_GRID = ALV_GRID.
+  CALL METHOD ALV_GRID->CHECK_CHANGED_DATA.
+  U_SELFIELD-REFRESH = 'X'.
+
+
+  CASE U_UCOMM.
+    WHEN 'ZALL'.
+      LOOP AT GIT_OUT INTO GWA_OUTPUT.
+        GWA_OUTPUT-SEL  = 'X'.
+        IF SY-SUBRC = 0.
+          MODIFY GIT_OUT FROM GWA_OUTPUT.
+        ENDIF.
+      ENDLOOP.
+    WHEN 'ZCAN'.
+      LOOP AT GIT_OUT INTO GWA_OUTPUT.
+        GWA_OUTPUT-SEL  = ''.
+        IF SY-SUBRC = 0.
+          MODIFY GIT_OUT FROM GWA_OUTPUT.
+        ENDIF.
+      ENDLOOP.
+    WHEN 'PRINT1'."打印
+      MOVE GIT_OUT TO GIT_PRINT .
+      DELETE GIT_PRINT WHERE SEL <> 'X'.
+      SORT GIT_PRINT.
+      DELETE ADJACENT DUPLICATES FROM GIT_PRINT COMPARING BELNR.
+      DESCRIBE TABLE GIT_PRINT LINES LC_LINE.
+*      IF LC_LINE <> 1.
+*        MESSAGE '只能选择一行进行打印' TYPE 'S' DISPLAY LIKE 'E'.
+*      ELSE.
+      PERFORM FRM_OPENS.
+      DATA(LIT_PRINT_TMP) = GIT_PRINT.
+      LOOP AT LIT_PRINT_TMP INTO DATA(LS_PRINT_TMP).
+        CLEAR GIT_PRINT.
+        APPEND LS_PRINT_TMP TO GIT_PRINT.
+        PERFORM FRM_PRINT.
+      ENDLOOP.
+      PERFORM FRM_CLOSE.
+*      ENDIF.
+
+
+    WHEN '&IC1'.
+      CALL METHOD ALV_GRID->GET_CURRENT_CELL "双击第几行
+        IMPORTING
+          E_ROW = LV_INDEX.
+
+      CLEAR GWA_OUTPUT.
+      READ TABLE GIT_OUTPUT INTO GWA_OUTPUT INDEX LV_INDEX.
+
+      CASE U_SELFIELD-FIELDNAME.
+        WHEN 'BELNR'.
+          IF GWA_OUTPUT-BELNR IS NOT INITIAL AND GWA_OUTPUT-GJAHR IS NOT INITIAL.
+            SET PARAMETER ID 'RBN' FIELD GWA_OUTPUT-BELNR .
+            SET PARAMETER ID 'GJR' FIELD GWA_OUTPUT-GJAHR .
+            CALL TRANSACTION 'MIR4' AND SKIP FIRST SCREEN.
+          ELSE.
+            MESSAGE '发票凭证号不能为空' TYPE 'E'.
+          ENDIF.
+        WHEN 'EBELN'.
+
+          CALL FUNCTION 'ME_DISPLAY_PURCHASE_DOCUMENT'
+            EXPORTING
+              I_EBELN              = GWA_OUTPUT-EBELN
+            EXCEPTIONS
+              NOT_FOUND            =
+                                     1
+              NO_AUTHORITY         = 2
+              INVALID_CALL         = 3
+              PREVIEW_NOT_POSSIBLE = 4
+              OTHERS               = 5.
+          IF SY-SUBRC <> 0.
+            MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO.
+          ENDIF.
+      ENDCASE.
+
+***----------- begin of add by wuzhenfei 18.09.2018
+
+    WHEN 'ZMMRP032'.
+
+
+      DATA(LIT_OUTPUT) = GIT_OUT[].
+      DELETE LIT_OUTPUT WHERE SEL <> 'X'.
+
+      DESCRIBE TABLE LIT_OUTPUT LINES DATA(LV_LINE).
+      IF LV_LINE <> 1.
+        CALL FUNCTION 'POPUP_TO_DISPLAY_TEXT'
+          EXPORTING
+            TEXTLINE1 = '请选择一行数据'.
+        EXIT.
+      ENDIF.
+
+      READ TABLE LIT_OUTPUT INDEX 1 INTO DATA(LWA_OUTPUT).
+
+      SET PARAMETER ID 'ZCXDH' FIELD LWA_OUTPUT-BELNR.
+      SET PARAMETER ID 'ZCXLX' FIELD 'I'.
+      CALL  TRANSACTION 'ZMMRP032_CALL' AND SKIP FIRST SCREEN.
+
+***----------- end of add by wuzhenfei 18.09.2018
+***---------------------- begin of add by wuzhenfei 16.07.2018
+    WHEN 'REFRESH'.
+
+      CALL FUNCTION 'ZMM_REFRESH_PROG'
+        EXPORTING
+          I_NAME = SY-CPROG.
+***---------------------- end of add by wuzhenfei 16.07.2018
+  ENDCASE.
+ENDFORM.
+```
+
+## SSF_FUNCTION_MODULE_NAME
+
+## SSF_OPEN
+
+```ABAP
+FORM FRM_OPENS .
+  CALL FUNCTION 'SSF_FUNCTION_MODULE_NAME'
+    EXPORTING
+      FORMNAME           = 'ZPILOT01_YCSY_MMFM003A_SM'
+    IMPORTING
+      FM_NAME            = GC_FNAME
+    EXCEPTIONS
+      NO_FORM            = 1
+      NO_FUNCTION_MODULE = 2
+      OTHERS             = 3.
+
+* SMARTFORMS初始化定义
+  GC_CONTROL-NO_DIALOG = ''.
+  GC_CONTROL-PREVIEW   = ''.
+  GC_CONTROL-NO_OPEN   = 'X'.
+  GC_CONTROL-NO_CLOSE  = 'X'.
+
+  CALL FUNCTION 'SSF_OPEN'
+    EXPORTING
+      CONTROL_PARAMETERS = GC_CONTROL
+    EXCEPTIONS
+      FORMATTING_ERROR   = 1
+      INTERNAL_ERROR     = 2
+      SEND_ERROR         = 3
+      USER_CANCELED      = 4
+      OTHERS             = 5.
+ENDFORM.
+```
+
+##  PRINT
+
+```ABAP
+FORM FRM_PRINT .
+  DATA:LC_ITEM(255) TYPE C.
+  DATA: LC_XH TYPE P.
+  DATA: HJ1 TYPE RSEG-MENGE.
+  DATA: HJ2 TYPE RSEG-WRBTR,
+        HJ3 TYPE RSEG-WRBTR,
+        HJ4 TYPE RSEG-WRBTR.
+  CLEAR HJ1.CLEAR HJ2.CLEAR HJ3.CLEAR HJ4.
+
+  CLEAR GWA_PRINT.
+  READ TABLE GIT_PRINT INTO GWA_PRINT INDEX 1.
+  IF GWA_PRINT-WAERS = 'JPY'.
+*    WRITE GWA_PRINT-RMWWR TO GWA_PRINT-RMWWR CURRENCY GWA_PRINT-WAERS.
+    GWA_PRINT-RMWWR = GWA_PRINT-RMWWR * 100.
+  ENDIF.
+  
+  CASE  GWA_PRINT-MWSKZ1."税率
+    WHEN 'J0'.
+      GWA_PRINT-SL = '0'.
+    WHEN 'J1'.
+      GWA_PRINT-SL = '17%'.
+    WHEN 'J2'.
+      GWA_PRINT-SL = '13%'.
+    WHEN 'J3'.
+      GWA_PRINT-SL = '11%'.
+    WHEN 'J4'.
+      GWA_PRINT-SL = '6%'.
+    WHEN 'J5'.
+      GWA_PRINT-SL = '5%'.
+    WHEN 'J6'.
+      GWA_PRINT-SL = '3%'.
+    WHEN 'J7'.
+      GWA_PRINT-SL = '16%'.
+    WHEN 'J8'.
+      GWA_PRINT-SL = '10%'.
+    WHEN 'J9'.
+      GWA_PRINT-SL = '9%'.
+    WHEN OTHERS.
+  ENDCASE.
+
+  CLEAR GIT_PRINT1[].
+  SELECT  MATNR MWSKZ MENGE WRBTR BSTME BUZEI EBELP
+    FROM RSEG
+    INTO CORRESPONDING FIELDS OF TABLE GIT_PRINT1
+    WHERE BELNR = GWA_PRINT-BELNR.
+
+  LOOP AT GIT_PRINT1 INTO GWA_PRINT1.
+    LC_XH = LC_XH + 1.
+    GWA_PRINT1-XH = LC_XH.
+
+    " 物资名称优先取物料长描述（ZMMIF001-ZMAKTG），没有长描述再取短描述MAKTX
+    CLEAR: GWA_PRINT1-MAKTX.
+    SELECT SINGLE ZMAKTG
+      INTO GWA_PRINT1-MAKTX
+      FROM ZMMIF001
+      WHERE MATNR = GWA_PRINT1-MATNR.
+    IF SY-SUBRC NE 0 OR GWA_PRINT1-MAKTX IS INITIAL.
+      SELECT SINGLE MAKTX"物料名称
+        FROM MAKT
+        INTO GWA_PRINT1-MAKTX
+        WHERE MATNR = GWA_PRINT1-MATNR.
+    ENDIF.
+
+    SELECT SINGLE MSEHT"计量单位描述
+      FROM T006A
+      INTO GWA_PRINT1-MSEHT
+      WHERE MSEHI = GWA_PRINT1-BSTME.
+
+    IF GWA_PRINT1-MENGE GE 0.
+      GWA_PRINT1-DJ = GWA_PRINT1-WRBTR / GWA_PRINT1-MENGE."单价
+    ENDIF.
+
+    CASE  GWA_PRINT1-MWSKZ."税率
+      WHEN 'J0'.
+        GWA_PRINT1-SL = '0'.
+        GWA_PRINT1-SLSZ = 0.
+      WHEN 'J1'.
+        GWA_PRINT1-SL = '17%'.
+        GWA_PRINT1-SLSZ = 17 / 100.
+      WHEN 'J2'.
+        GWA_PRINT1-SL = '13%'.
+        GWA_PRINT1-SLSZ = 13 / 100.
+      WHEN 'J3'.
+        GWA_PRINT1-SL = '11%'.
+        GWA_PRINT1-SLSZ = 11 / 100.
+      WHEN 'J4'.
+        GWA_PRINT1-SL = '6%'.
+        GWA_PRINT1-SLSZ = 6 / 100.
+      WHEN 'J5'.
+        GWA_PRINT1-SL = '5%'.
+        GWA_PRINT1-SLSZ = 5 / 100.
+      WHEN 'J6'.
+        GWA_PRINT1-SL = '3%'.
+        GWA_PRINT1-SLSZ = 3 / 100.
+
+      WHEN 'J7'.
+        GWA_PRINT1-SL = '16%'.
+        GWA_PRINT1-SLSZ = 16 / 100.
+
+      WHEN 'J8'.
+        GWA_PRINT1-SL = '10%'.
+        GWA_PRINT1-SLSZ = 10 / 100.
+      WHEN OTHERS.
+    ENDCASE.
+
+*-----MODIFY BY QIJI 20171109 BEGIN-------*
+*    GWA_PRINT1-SE = GWA_PRINT1-WRBTR * GWA_PRINT1-SLSZ."税额
+*    GWA_PRINT1-JSHJ = GWA_PRINT1-WRBTR * ( 1 + GWA_PRINT1-SLSZ ) ."价税合计
+
+*然后在EKPO中根据采购订单号EBELN和采购订单行项目EBELP取行项目的含税总金额BRTWR。
+    SELECT SINGLE BRTWR
+      FROM EKPO
+      INTO GWA_PRINT1-JSHJ         "价税合计
+      WHERE EBELN = GWA_PRINT-EBELN
+      AND   EBELP = GWA_PRINT1-EBELP.
+*税额=价税合计÷1.17×0.17
+    GWA_PRINT1-SE = GWA_PRINT1-JSHJ / ( 1 + GWA_PRINT1-SLSZ ) * GWA_PRINT1-SLSZ . "税额
+*      GWA_PRINT1-SE = GWA_PRINT-WMWST1."MODIFY BY SXL  改成alv税额  顾问：韩愈
+*-----MODIFY BY QIJI 20171109 END---------*
+
+    HJ1 = HJ1 +  GWA_PRINT1-MENGE."合计数量
+    HJ2 = HJ2 +  GWA_PRINT1-WRBTR."合计金额
+    HJ3 = HJ3 + GWA_PRINT1-SE."合计税额
+    HJ4 = HJ4 + GWA_PRINT1-JSHJ."合计价税合计
+*    GWA_PRINT-SL = GWA_PRINT1-SL.   " delete by wuzhenfei 06.06.2018 16:57:00
+
+*--------------------------------------------------------------------*
+    " 增加大类字段 2018.08.02
+*--------------------------------------------------------------------*
+    SELECT SINGLE MATKL
+      INTO @DATA(LV_MATKL)
+      FROM MARA
+    WHERE MATNR = @GWA_PRINT1-MATNR.
+
+*    IF LV_MATKL+0(2) >= 1 AND LV_MATKL+0(2) <= 60.
+    IF LV_MATKL+0(2) <> '99'.
+      GWA_PRINT1-ZDL = LV_MATKL+0(2).
+    ELSE.
+      GWA_PRINT1-ZDL = LV_MATKL+2(2).
+    ENDIF.
+
+    SELECT SINGLE ZDLMC
+      INTO @GWA_PRINT1-ZDLMC
+      FROM ZTMMDG016B
+     WHERE ZDL = @GWA_PRINT1-ZDL.
+
+    IF GWA_PRINT1-MENGE GE 0.
+      GWA_PRINT1-DJ = GWA_PRINT1-WRBTR / GWA_PRINT1-MENGE."单价
+    ENDIF.
+
+    IF GWA_PRINT-WAERS = 'JPY'.
+      GWA_PRINT1-WRBTR = GWA_PRINT1-WRBTR * 100.
+    ENDIF.
+
+    MODIFY GIT_PRINT1 FROM GWA_PRINT1.
+    CLEAR GWA_PRINT1-SE.
+
+  ENDLOOP.
+
+  CONCATENATE 'ZPILOT01_YCSY_MMFM003A' SY-UNAME SY-DATUM INTO LC_ITEM.
+  EXPORT  GWA_PRINT GIT_PRINT1  TO MEMORY ID LC_ITEM.
+
+  IF GWA_PRINT-WAERS = 'JPY'.
+    HJ2 = HJ2 * 100.
+  ENDIF.
+
+*ZMMFM003采购结算单打印
+  DATA : LV_BUTXT  TYPE CHAR128,
+         LV_MEMORY TYPE CHAR255..
+  SELECT SINGLE BUTXT FROM T001 INTO LV_BUTXT WHERE BUKRS = P_BUKRS.
+  IF P_BUKRS = '3000' OR P_BUKRS = '3010' OR P_BUKRS = '3020'.
+    REPLACE '（代理）' WITH '' INTO LV_BUTXT.
+  ENDIF.
+  IF R_YGZ = ''.
+    LV_BUTXT = LV_BUTXT && '采购结算申请单'.
+  ELSE.
+    LV_BUTXT = LV_BUTXT && '采购结算单'.
+  ENDIF.
+  IF SY-SUBRC = 0.
+    CONCATENATE 'ZPILOT01_YCSY_MMFM003A' SY-UNAME SY-DATUM 'BUTXT' INTO LV_MEMORY.
+    EXPORT P1 = LV_BUTXT TO MEMORY ID LV_MEMORY.
+  ENDIF.
+
+  CALL FUNCTION GC_FNAME
+    EXPORTING
+      CONTROL_PARAMETERS = GC_CONTROL
+      USER_SETTINGS      = ''
+      HJ1                = HJ1
+      HJ2                = HJ2
+      HJ3                = HJ3
+      HJ4                = HJ4
+    EXCEPTIONS
+      FORMATTING_ERROR   = 1
+      INTERNAL_ERROR     = 2
+      SEND_ERROR         = 3
+      USER_CANCELED      = 4
+      OTHERS             = 5.
+
+ENDFORM.
+```
+
+## SFF_CLOSE
+
+```ABAP
+FORM FRM_CLOSE .
+  CALL FUNCTION 'SSF_CLOSE'
+    EXCEPTIONS
+      FORMATTING_ERROR = 1
+      INTERNAL_ERROR   = 2
+      SEND_ERROR       = 3
+      OTHERS           = 4.
+ENDFORM.
+```
+
